@@ -1,0 +1,36 @@
+stages:
+    - build
+    - start
+
+jobBuildDev:
+    stage: build
+    script: 
+    -  tar czvf f.tar.gz * 
+    -  scp f.tar.gz root@mvp.mu51c.live:/data/www/fe-service/api-service/dev/.
+    -  ssh root@mvp.mu51c.live "cd /data/www/fe-service/api-service/dev/; tar zxvf f.tar.gz ;docker run -v /data/www/fe-service/api-service/dev:/data --rm node:yarn "
+    -  ansible music -m shell -a  ' ssh root@172.100.2.204 "    kubectl rollout restart deployment api-service-dev-deployment" '
+    -  /sysadmin/bin/curl.sh  "https://api-service-dev.lyrra.io" 构建完成
+    only: 
+    - dev
+
+jobBuildTest:
+    stage: build
+    script: 
+    -  tar czvf f.tar.gz * 
+    -  scp f.tar.gz root@mvp.mu51c.live:/data/www/fe-service/api-service/test/.
+    -  ssh root@mvp.mu51c.live "cd /data/www/fe-service/api-service/test/; tar zxvf f.tar.gz ;docker run -v /data/www/fe-service/api-service/test:/data --rm node:yarn  "
+    -  ansible music -m shell -a  ' ssh root@172.100.2.204 "kubectl rollout restart deployment api-service-test-deployment" '
+    -  /sysadmin/bin/curl.sh  "https://api-service-test.lyrra.io" 构建完成
+    only: 
+    - test
+
+jobBuildPre:
+    stage: build
+    script: 
+    -  tar czvf f.tar.gz * 
+    -  scp f.tar.gz root@mvp.mu51c.live:/data/www/fe-service/api-service/pre/.
+    -  ssh root@mvp.mu51c.live "cd /data/www/fe-service/api-service/pre/; tar zxvf f.tar.gz ; docker run -v /data/www/fe-service/api-service/pre:/data --rm node:yarn  "
+    -  ansible music -m shell -a  ' ssh root@172.100.2.204 "kubectl rollout restart deployment api-service-pre-deployment" '
+    -  /sysadmin/bin/curl.sh  "https://api-service-pre.lyrra.io" 构建完成
+    only: 
+    - pre

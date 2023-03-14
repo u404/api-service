@@ -1,0 +1,168 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ appName }}-deployment
+  namespace: {{ namespace  }}
+  labels:
+    app: {{ appName  }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ appName  }}
+  template:
+    metadata:
+      labels:
+        app: {{ appName }}
+    spec:
+      initContainers:
+        - name: init
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          command: ["sh","-c","wget -O /root/start.sh http://{{config}}.lyrra.io/k8s/{{appName}}/start.sh; wget -O /root/stop.sh http://{{config}}.lyrra.io/k8s/{{appName}}/stop.sh; chmod +x /root/start.sh ;chmod +x /root/stop.sh"]
+          volumeMounts:
+              - name: emptypod
+                mountPath: "/root"
+              - name: time
+                mountPath: "/etc/localtime"
+      containers:
+        - name: {{appName}}
+          image: {{image}}
+          imagePullPolicy: Always
+          env:
+            - name: WALLET_DES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-service-prod
+                  key: WALLET_DES_KEY
+            - name: WALLET_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-service-prod
+                  key: WALLET_PRIVATE_KEY
+            - name: WALLET_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-service-prod
+                  key: WALLET_AES_KEY
+{% if port  %}
+          ports:
+              - containerPort: {{port}}
+          livenessProbe:
+              tcpSocket:
+                  port: {{port}}
+              initialDelaySeconds: 15
+              periodSeconds: 20
+          readinessProbe:
+              tcpSocket:
+                  port: {{port}}
+              initialDelaySeconds: 15
+              periodSeconds: 20
+{% endif %}
+          lifecycle:
+              postStart:
+                  exec:
+                      command:
+                          - /root/start.sh
+              preStop:
+                  exec:
+                      command:
+                          - /root/stop.sh 
+          volumeMounts:
+            - name: emptypod 
+              mountPath: "/root"
+            - name: time
+              mountPath: "/etc/localtime"
+            - name: emptylog
+              mountPath: {{log}}
+        - name: {{appName}}-log
+          image: logstash:7.4.1
+          imagePullPolicy: IfNotPresent
+          lifecycle:
+              preStop:
+                  exec:
+                      command:
+                          - /bin/sh
+                          - -c 
+                          - "sleep 10"
+          volumeMounts:
+            - name: time
+              mountPath: "/etc/localtime"
+            - name: logstash
+              mountPath: "/usr/share/logstash/config" 
+            - name: log
+              mountPath: "/usr/share/logstash/conf.d"
+            - name: emptylog
+              mountPath: {{log}} 
+      volumes:
+        - name: time 
+          hostPath:
+            path: "/etc/localtime"
+        - name: emptypod
+          emptyDir: {}
+        - name: emptylog
+          emptyDir: {}
+        - name: logstash
+          configMap:
+              name: {{appName}}
+              items:
+                  - key: logstash.yml
+                    path: logstash.yml
+        - name: log
+          configMap:
+              name: {{appName}}
+              items:
+                  - key: log1.conf
+                    path: logs1.conf
+---
+{% if port %}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: {{appName}}
+  name: {{appName}}
+  namespace: {{namespace}}
+spec:
+  ports:
+    - port: {{port}}
+      protocol: TCP
+      targetPort: {{port}}
+  selector:
+    app: {{appName}}
+{% endif %}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+    name: {{appName}}
+    namespace: {{namespace}}
+data:
+    logstash.yml: |
+        path.config: /usr/share/logstash/conf.d/*.conf
+        path.logs: /var/log/logstash
+    log1.conf: |
+        input {
+            file {
+                path => ["{{log}}/*.log"]
+                type => "{{appName}}"
+                start_position => "beginning"
+                codec => multiline {
+                    pattern => "^\[SERVICE_LOG"
+                    negate => true
+                    what => "previous"
+                }
+            }
+        }
+        filter {
+        }
+        output {
+            elasticsearch {
+                 hosts => ["{{logserver}}"]
+                 index => "{{appName}}_%{+YYYY.MM.dd}"
+            } 
+        }
+---
+---
+---
